@@ -627,7 +627,7 @@ func (m *MTProto) ReadRoutine(stop <-chan struct{}) {
 
 }
 
-func (m *MTProto) Process(msgId int64, seqNo int32, data interface{}) (interface{}, error) {
+func (m *MTProto) Process(msgId int64, seqNo int32, data interface{}) interface{} {
 	fmt.Fprintln(os.Stderr, "Received: ", reflect.TypeOf(data))
 	switch data.(type) {
 	case TL_msg_container:
