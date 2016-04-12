@@ -283,13 +283,17 @@ func (m *DecodeBuf) Vector() []TL {
 	return x
 }
 
+func (e *TL_rpc_error) Error() string {
+	return fmt.Sprintf("Error %v: %v", e.error_code, e.error_message)
+}
+
 func (m *DecodeBuf) Object() (r TL) {
 	constructor := m.UInt()
 	if m.err != nil {
 		return nil
 	}
 
-	// fmt.Printf("[%08x]\n", constructor)
+	//	fmt.Printf("[%08x]\n", constructor)
 	// m.dump()
 
 	switch constructor {
@@ -376,9 +380,4 @@ func (m *DecodeBuf) Object() (r TL) {
 
 func (d *DecodeBuf) dump() {
 	fmt.Println(hex.Dump(d.buf[d.off:d.size]))
-}
-
-func toBool(x TL) bool {
-	_, ok := x.(TL_boolTrue)
-	return ok
 }

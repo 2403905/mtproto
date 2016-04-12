@@ -80,6 +80,14 @@ func (e *EncodeBuf) Bytes(s []byte) {
 	e.buf = append(e.buf, s...)
 }
 
+func (e *EncodeBuf) Bool(r bool) {
+	if r {
+		e.Bytes(TL_boolTrue{}.encode())
+	} else {
+		e.Bytes(TL_boolFalse{}.encode())
+	}
+}
+
 func (e *EncodeBuf) VectorInt(v []int32) {
 	x := make([]byte, 4+4+len(v)*4)
 	binary.LittleEndian.PutUint32(x, crc_vector)

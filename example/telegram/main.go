@@ -2,54 +2,28 @@ package main
 
 import (
 	"fmt"
-	"github.com/sdidyk/mtproto"
 	"os"
+	"regexp"
+	"strconv"
+	"strings"
+
+	"github.com/JuanPotato/mtproto"
+	"gopkg.in/readline.v1"
 )
 
-func usage() {
-	fmt.Print("Telegram is a simple MTProto tool.\n\nUsage:\n\n")
-	fmt.Print("    ./telegram <command> [arguments]\n\n")
-	fmt.Print("The commands are:\n\n")
-	fmt.Print("    auth  <phone_number>            auth connection by code\n")
-	fmt.Print("    msg	<peer_id> <msgtext>        send message to user\n")
-	fmt.Print("    sendmedia <peer_id> <file>      send media file to user\n")
-	fmt.Print("    list                            get contact list\n")
-	fmt.Print("    dialogs                         get dialogs\n")
-	fmt.Println()
-}
-
 var commands = map[string]int{
-	"auth":      1,
-	"msg":       2,
-	"sendmedia": 2,
-	"list":      0,
-	"dialogs":   0,
+	"auth":          1,
+	"list":          0,
+	"dialogs":       0,
+	"get_full_chat": 1,
+	"msg":           2,
+	"edit_title":    2,
+	"sendmedia":     2,
+	"exit":          0,
 }
 
 func main() {
 	var err error
-
-	if len(os.Args) < 2 {
-		usage()
-		os.Exit(1)
-	}
-
-	valid := false
-	for k, v := range commands {
-		if os.Args[1] == k {
-			if len(os.Args) < v+2 {
-				usage()
-				os.Exit(1)
-			}
-			valid = true
-			break
-		}
-	}
-
-	if !valid {
-		usage()
-		os.Exit(1)
-	}
 
 	m, err := mtproto.NewMTProto(os.Getenv("HOME") + "/.telegram_go")
 	if err != nil {
@@ -62,17 +36,83 @@ func main() {
 		fmt.Printf("Connect failed: %s\n", err)
 		os.Exit(2)
 	}
-	switch os.Args[1] {
-	case "auth":
-		err = m.Auth(os.Args[2])
-	case "msg":
-		err = m.SendMsg(os.Args[2], os.Args[3])
-	case "list":
-		err = m.GetContacts()
-	case "dialogs":
-		err = m.GetChats()
-	case "sendmedia":
-		err = m.SendMedia(os.Args[2], os.Args[3])
+
+	// TODO Do this better
+	var completer = readline.NewPrefixCompleter(
+		readline.PcItem("auth"),
+		readline.PcItem("list"),
+		readline.PcItem("dialogs"),
+		readline.PcItem("get_full_chat"),
+		readline.PcItem("edit_title"),
+		readline.PcItem("msg"),
+		readline.PcItem("sendmedia"),
+		readline.PcItem("resolve_username"),
+		readline.PcItem("exit"),
+	)
+
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:       "> ",
+		AutoComplete: completer,
+		HistoryFile:  "/tmp/readline.tmp",
+	})
+
+	if err != nil {
+		panic(err)
+	}
+	defer rl.Close()
+
+	shell := true
+	for shell {
+		input, err := rl.Readline()
+		if err != nil {
+			break
+		}
+		if input == "" {
+			continue
+		}
+		commandline := regexp.MustCompile(`(?:(".*?"))|[^\s]+`)
+		args := commandline.FindAllString(input, -1)
+
+		for i := range args {
+			args[i] = strings.Trim(args[i], `"`)
+		}
+
+		// TODO Do this better
+		switch args[0] {
+		case "help":
+			for v, k := range commands {
+				fmt.Printf("    %s [%d]\n", v, k)
+			}
+		case "auth":
+			err = m.Auth(args[1])
+		case "list":
+			err = m.GetContacts()
+		case "dialogs":
+			err = m.GetDialogs()
+		case "edit_title":
+			err = m.EditTitle(args[1], args[2])
+		case "get_full_chat":
+			chat_id, _ := strconv.Atoi(args[1])
+			err = m.GetFullChat(int32(chat_id))
+		case "resolve_username":
+			if len(args) == 2 {
+				fmt.Println(args[1])
+				u, err := m.ResolveUsername(args[1])
+				if err != nil {
+					fmt.Println(err)
+				} else {
+					fmt.Println(u)
+				}
+			}
+		case "msg":
+			err = m.SendMsg(args[1], args[2])
+		case "sendmedia":
+			err = m.SendMedia(args[1], args[2])
+		case "exit":
+			shell = false
+		default:
+			fmt.Println(args[0], "not found.")
+		}
 	}
 
 	if err != nil {

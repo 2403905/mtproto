@@ -6,12 +6,17 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"regexp"
+	"sort"
 	"strconv"
+	"strings"
 )
 
 type nametype struct {
 	name  string
 	_type string
+	ttype string
+	flag  int
 }
 
 type constuctor struct {
@@ -33,6 +38,10 @@ func normalize(s string) string {
 		return "_type"
 	}
 	return y
+}
+
+func lower_first(s string) string {
+	return strings.ToLower(string(s[0])) + string(s[1:len(s)])
 }
 
 func main() {
@@ -58,7 +67,7 @@ func main() {
 	// process constructors
 	_order := make([]string, 0, 1000)
 	_cons := make(map[string]constuctor, 1000)
-	_types := make(map[string][]string, 1000)
+	var _types []string
 
 	parsefunc := func(data []interface{}, kind string) {
 		for _, data := range data {
@@ -84,7 +93,19 @@ func main() {
 			params := data["params"].([]interface{})
 			for _, params := range params {
 				params := params.(map[string]interface{})
-				_params = append(_params, nametype{normalize(params["name"].(string)), normalize(params["type"].(string))})
+				_name := normalize(params["name"].(string))
+				_type := normalize(params["type"].(string))
+				_ttype := ""
+				_flag := -1
+
+				flagRegex := regexp.MustCompile("([a-zA-Z]+)_(\\d+)\\?([a-zA-Z<>]+)")
+				m := flagRegex.FindStringSubmatch(_type)
+				if len(m) > 0 {
+					_type = m[3]
+					_flag, _ = strconv.Atoi(m[2])
+				}
+
+				_params = append(_params, nametype{_name, _type, _ttype, _flag})
 			}
 
 			// type
@@ -93,7 +114,11 @@ func main() {
 			_order = append(_order, _predicate)
 			_cons[_predicate] = constuctor{_id, _predicate, _params, _type}
 			if kind == "predicate" {
-				_types[_type] = append(_types[_type], _predicate)
+				sort.Strings(_types)
+				i := sort.SearchStrings(_types, _type)
+				if i >= len(_types) || _types[i] != _type {
+					_types = append(_types, _predicate)
+				}
 			}
 		}
 	}
@@ -101,7 +126,14 @@ func main() {
 	parsefunc(parsed.(map[string]interface{})["methods"].([]interface{}), "method")
 
 	// constants
-	fmt.Print("package mtproto\nimport \"fmt\"\nconst (\n")
+	fmt.Print(`package mtproto
+import (
+	"fmt"
+	"encoding/binary"
+	"errors"
+)
+const (
+`)
 	for _, key := range _order {
 		c := _cons[key]
 		fmt.Printf("crc_%s = %s\n", c.predicate, c.id)
@@ -112,9 +144,11 @@ func main() {
 	for _, key := range _order {
 		c := _cons[key]
 		fmt.Printf("type TL_%s struct {\n", c.predicate)
-		for _, t := range c.params {
+		for _i, t := range c.params {
 			fmt.Printf("%s\t", t.name)
 			switch t._type {
+			case "#":
+				fmt.Printf("uint32")
 			case "int":
 				fmt.Printf("int32")
 			case "long":
@@ -125,6 +159,8 @@ func main() {
 				fmt.Printf("float64")
 			case "bytes":
 				fmt.Printf("[]byte")
+			case "Bool", "true":
+				fmt.Printf("bool")
 			case "Vector<int>":
 				fmt.Printf("[]int32")
 			case "Vector<long>":
@@ -137,11 +173,31 @@ func main() {
 				fmt.Printf("TL")
 			default:
 				var inner string
+				var k string
+
 				n, _ := fmt.Sscanf(t._type, "Vector<%s", &inner)
 				if n == 1 {
-					fmt.Printf("[]TL // %s", inner[:len(inner)-1])
+					k = inner[:len(inner)-1]
 				} else {
-					fmt.Printf("TL // %s", t._type)
+					k = t._type
+				}
+
+				lk := lower_first(k)
+
+				i := sort.SearchStrings(_types, lk)
+				if i < len(_types) && _types[i] == lk {
+					if n == 1 {
+						fmt.Printf("[]TL_%s", lk)
+					} else {
+						c.params[_i].ttype = fmt.Sprintf("TL_%s", lk)
+						fmt.Printf(c.params[_i].ttype)
+					}
+				} else {
+					if n == 1 {
+						fmt.Printf("[]TL // %s", k)
+					} else {
+						fmt.Printf("TL // %s", k)
+					}
 				}
 			}
 			fmt.Printf("\n")
@@ -156,21 +212,30 @@ func main() {
 		fmt.Printf("x := NewEncodeBuf(512)\n")
 		fmt.Printf("x.UInt(crc_%s)\n", c.predicate)
 		for _, t := range c.params {
+			if t.flag > -1 {
+				fmt.Printf("if (e.flags & (1 << %d)) > 0 {", t.flag)
+			}
 			switch t._type {
 			case "int":
 				fmt.Printf("x.Int(e.%s)\n", t.name)
+			case "#":
+				fmt.Printf("x.UInt(e.%s)\n", t.name)
+			case "Bool":
+				fmt.Printf("x.Bool(e.%s)\n", t.name)
+			case "true":
+				// nothing
 			case "long":
 				fmt.Printf("x.Long(e.%s)\n", t.name)
-			case "string":
-				fmt.Printf("x.String(e.%s)\n", t.name)
 			case "double":
 				fmt.Printf("x.Double(e.%s)\n", t.name)
-			case "bytes":
-				fmt.Printf("x.StringBytes(e.%s)\n", t.name)
+			case "string":
+				fmt.Printf("x.String(e.%s)\n", t.name)
 			case "Vector<int>":
 				fmt.Printf("x.VectorInt(e.%s)\n", t.name)
 			case "Vector<long>":
 				fmt.Printf("x.VectorLong(e.%s)\n", t.name)
+			case "bytes":
+				fmt.Printf("x.StringBytes(e.%s)\n", t.name)
 			case "Vector<string>":
 				fmt.Printf("x.VectorString(e.%s)\n", t.name)
 			case "!X":
@@ -181,15 +246,93 @@ func main() {
 				var inner string
 				n, _ := fmt.Sscanf(t._type, "Vector<%s", &inner)
 				if n == 1 {
-					fmt.Printf("x.Vector(e.%s)\n", t.name)
+					lk := lower_first(inner[:len(inner)-1])
+					i := sort.SearchStrings(_types, lk)
+					if i < len(_types) && _types[i] == lk {
+						fmt.Printf("x.Vector_%s(e.%s)\n", lk, t.name)
+					} else {
+						fmt.Printf("x.Vector(e.%s)\n", t.name)
+					}
 				} else {
 					fmt.Printf("x.Bytes(e.%s.encode())\n", t.name)
 				}
+			}
+			if t.flag > -1 {
+				fmt.Print("}\n")
 			}
 		}
 		fmt.Printf("return x.buf\n")
 		fmt.Printf("}\n\n")
 
+	}
+	vencode := `
+func (e *EncodeBuf) Vector_%s(v []TL_%s) {
+	x := make([]byte, 512)
+	binary.LittleEndian.PutUint32(x, crc_vector)
+	binary.LittleEndian.PutUint32(x[4:], uint32(len(v)))
+	e.buf = append(e.buf, x...)
+	for _, v := range v {
+		e.buf = append(e.buf, v.encode()...)
+	}
+}
+`
+	vdecode := `
+func (db *DecodeBuf) Vector_%s() []TL_%s {
+	constructor := db.UInt()
+	if db.err != nil {
+		return nil
+	}
+	if constructor != crc_vector {
+		db.err = fmt.Errorf("DecodeVector: Wrong constructor (0x%%08x)", constructor)
+		return nil
+	}
+	size := db.Int()
+	if db.err != nil {
+		return nil
+	}
+	if size < 0 {
+		db.err = errors.New("DecodeVector: Wrong size")
+		return nil
+	}
+	x := make([]TL_%s, size)
+	i := int32(0)
+	for i < size {
+		y := db.Object().(TL_%s)
+		if db.err != nil {
+			return nil
+		}
+		x[i] = y
+		i++
+	}
+	return x
+}
+`
+	// decode & encode vectors
+	var vectors []string
+
+	for _, key := range _order {
+		c := _cons[key]
+		for _, t := range c.params {
+			var inner string
+
+			n, _ := fmt.Sscanf(t._type, "Vector<%s", &inner)
+			if n != 1 {
+				continue
+			}
+
+			lk := lower_first(inner[:len(inner)-1])
+
+			q := sort.SearchStrings(vectors, lk)
+			i := sort.SearchStrings(_types, lk)
+			if i < len(_types) && _types[i] == lk && n == 1 {
+				if q >= len(vectors) || vectors[q] != lk {
+					fmt.Printf(vdecode, lk, lk, lk, lk)
+					fmt.Printf(vencode, lk, lk)
+					vectors = append(vectors, lk)
+					sort.Strings(vectors)
+				}
+			}
+		}
 	}
 
 	// decode funcs
@@ -199,41 +342,82 @@ func (m *DecodeBuf) ObjectGenerated(constructor uint32) (r TL) {
 
 	for _, key := range _order {
 		c := _cons[key]
+		var flag bool
+		begin := ""
+		endin := ",\n"
 		fmt.Printf("case crc_%s:\n", c.predicate)
-		fmt.Printf("r = TL_%s{\n", c.predicate)
+		if len(c.params) > 0 && c.params[0]._type == "#" {
+			flag = true
+			endin = "\n"
+			fmt.Printf("rr := TL_%s{}\n", c.predicate)
+		} else {
+			fmt.Printf("r = TL_%s{\n", c.predicate)
+		}
+
 		for _, t := range c.params {
+			if flag {
+				begin = fmt.Sprintf("rr.%s = ", t.name)
+			}
+			if t.flag > -1 {
+				fmt.Printf("if (rr.flags & (1 << %d)) > 0 {", t.flag)
+			}
+
 			switch t._type {
 			case "int":
-				fmt.Print("m.Int(),\n")
+				fmt.Printf("%sm.Int()%s", begin, endin)
+			case "#":
+				fmt.Printf("%sm.UInt()%s", begin, endin)
+			case "Bool":
+				fmt.Printf("%sm.Bool()%s", begin, endin)
 			case "long":
-				fmt.Print("m.Long(),\n")
-			case "string":
-				fmt.Print("m.String(),\n")
+				fmt.Printf("%sm.Long()%s", begin, endin)
 			case "double":
-				fmt.Print("m.Double(),\n")
-			case "bytes":
-				fmt.Print("m.StringBytes(),\n")
+				fmt.Printf("%sm.Double()%s", begin, endin)
+			case "string":
+				fmt.Printf("%sm.String()%s", begin, endin)
 			case "Vector<int>":
-				fmt.Print("m.VectorInt(),\n")
+				fmt.Printf("%sm.VectorInt()%s", begin, endin)
 			case "Vector<long>":
-				fmt.Print("m.VectorLong(),\n")
+				fmt.Printf("%sm.VectorLong()%s", begin, endin)
+			case "bytes":
+				fmt.Printf("%sm.StringBytes()%s", begin, endin)
 			case "Vector<string>":
-				fmt.Print("m.VectorString(),\n")
+				fmt.Printf("%sm.VectorString()%s", begin, endin)
 			case "!X":
-				fmt.Print("m.Object(),\n")
+				fmt.Printf("%sm.Object()%s", begin, endin)
+			case "true":
+				fmt.Printf("%strue", begin)
 			case "Vector<double>":
 				panic(fmt.Sprintf("Unsupported %s", t._type))
 			default:
 				var inner string
 				n, _ := fmt.Sscanf(t._type, "Vector<%s", &inner)
 				if n == 1 {
-					fmt.Print("m.Vector(),\n")
+					lk := lower_first(inner[:len(inner)-1])
+					i := sort.SearchStrings(_types, lk)
+					if i < len(_types) && _types[i] == lk {
+						fmt.Printf("%sm.Vector_%s()%s", begin, lk, endin)
+					} else {
+						fmt.Printf("%sm.Vector()%s", begin, endin)
+					}
 				} else {
-					fmt.Print("m.Object(),\n")
+					if t.ttype != "" {
+						fmt.Printf("%sm.Object().(%s)%s", begin, t.ttype, endin)
+					} else {
+						fmt.Printf("%sm.Object()%s", begin, endin)
+					}
 				}
 			}
+
+			if t.flag > -1 {
+				fmt.Print("}\n")
+			}
 		}
-		fmt.Print("}\n\n")
+		if flag {
+			fmt.Print("r = rr\n\n")
+		} else {
+			fmt.Print("}\n\n")
+		}
 	}
 
 	fmt.Println(`
@@ -249,5 +433,4 @@ func (m *DecodeBuf) ObjectGenerated(constructor uint32) (r TL) {
 
 	return
 }`)
-
 }
