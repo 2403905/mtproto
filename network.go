@@ -211,7 +211,7 @@ func (m *MTProto) makeAuthKey() error {
 		return errors.New("Handshake: Wrong nonce")
 	}
 	found := false
-	for _, b := range res.fingerprints {
+	for _, b := range res.server_public_key_fingerprints {
 		if uint64(b) == telegramPublicKey_FP {
 			found = true
 			break

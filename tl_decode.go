@@ -1,8 +1,6 @@
 package mtproto
 
 import (
-	"bytes"
-	"compress/gzip"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -239,6 +237,66 @@ func (m *DecodeBuf) VectorString() (r []string) {
 	return x
 }
 
+func (db *DecodeBuf) Vector_future_salt() []TL_future_salt {
+	constructor := db.UInt()
+	if db.err != nil {
+		return nil
+	}
+	if constructor != crc_vector {
+		db.err = fmt.Errorf("DecodeVector: Wrong constructor (0x%08x)", constructor)
+		return nil
+	}
+	size := db.Int()
+	if db.err != nil {
+		return nil
+	}
+	if size < 0 {
+		db.err = errors.New("DecodeVector: Wrong size")
+		return nil
+	}
+	x := make([]TL_future_salt, size)
+	i := int32(0)
+	for i < size {
+		y := db.Object().(TL_future_salt)
+		if db.err != nil {
+			return nil
+		}
+		x[i] = y
+		i++
+	}
+	return x
+}
+
+func (db *DecodeBuf) Vector_MT_message() []TL_MT_message {
+	constructor := db.UInt()
+	if db.err != nil {
+		return nil
+	}
+	if constructor != crc_vector {
+		db.err = fmt.Errorf("DecodeVector: Wrong constructor (0x%08x)", constructor)
+		return nil
+	}
+	size := db.Int()
+	if db.err != nil {
+		return nil
+	}
+	if size < 0 {
+		db.err = errors.New("DecodeVector: Wrong size")
+		return nil
+	}
+	x := make([]TL_MT_message, size)
+	i := int32(0)
+	for i < size {
+		y := db.Object().(TL_MT_message)
+		if db.err != nil {
+			return nil
+		}
+		x[i] = y
+		i++
+	}
+	return x
+}
+
 func (m *DecodeBuf) Bool() (r bool) {
 	constructor := m.UInt()
 	if m.err != nil {
@@ -285,97 +343,6 @@ func (m *DecodeBuf) Vector() []TL {
 
 func (e *TL_rpc_error) Error() string {
 	return fmt.Sprintf("Error %v: %v", e.error_code, e.error_message)
-}
-
-func (m *DecodeBuf) Object() (r TL) {
-	constructor := m.UInt()
-	if m.err != nil {
-		return nil
-	}
-
-	//	fmt.Printf("[%08x]\n", constructor)
-	// m.dump()
-
-	switch constructor {
-
-	case crc_resPQ:
-		r = TL_resPQ{m.Bytes(16), m.Bytes(16), m.BigInt(), m.VectorLong()}
-
-	case crc_server_DH_params_ok:
-		r = TL_server_DH_params_ok{m.Bytes(16), m.Bytes(16), m.StringBytes()}
-
-	case crc_server_DH_inner_data:
-		r = TL_server_DH_inner_data{
-			m.Bytes(16), m.Bytes(16), m.Int(),
-			m.BigInt(), m.BigInt(), m.Int(),
-		}
-
-	case crc_dh_gen_ok:
-		r = TL_dh_gen_ok{m.Bytes(16), m.Bytes(16), m.Bytes(16)}
-
-	case crc_ping:
-		r = TL_ping{m.Long()}
-
-	case crc_pong:
-		r = TL_pong{m.Long(), m.Long()}
-
-	case crc_msg_container:
-		size := m.Int()
-		arr := make([]TL_MT_message, size)
-		for i := int32(0); i < size; i++ {
-			arr[i] = TL_MT_message{m.Long(), m.Int(), m.Int(), m.Object()}
-			if m.err != nil {
-				return nil
-			}
-		}
-		r = TL_msg_container{arr}
-
-	case crc_rpc_result:
-		r = TL_rpc_result{m.Long(), m.Object()}
-
-	case crc_rpc_error:
-		r = TL_rpc_error{m.Int(), m.String()}
-
-	case crc_new_session_created:
-		r = TL_new_session_created{m.Long(), m.Long(), m.Bytes(8)}
-
-	case crc_bad_server_salt:
-		r = TL_bad_server_salt{m.Long(), m.Int(), m.Int(), m.Bytes(8)}
-
-	case crc_bad_msg_notification:
-		r = TL_crc_bad_msg_notification{m.Long(), m.Int(), m.Int()}
-
-	case crc_msgs_ack:
-		r = TL_msgs_ack{m.VectorLong()}
-
-	case crc_gzip_packed:
-		obj := make([]byte, 0, 1024)
-
-		var buf bytes.Buffer
-		_, _ = buf.Write(m.StringBytes())
-		gz, _ := gzip.NewReader(&buf)
-
-		b := make([]byte, 1024)
-		for true {
-			n, _ := gz.Read(b)
-			obj = append(obj, b...)
-			if n <= 0 {
-				break
-			}
-		}
-		d := NewDecodeBuf(obj)
-		r = d.Object()
-
-	default:
-		r = m.ObjectGenerated(constructor)
-
-	}
-
-	if m.err != nil {
-		return nil
-	}
-
-	return
 }
 
 func (d *DecodeBuf) dump() {

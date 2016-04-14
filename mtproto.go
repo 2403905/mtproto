@@ -26,6 +26,7 @@ const (
 )
 
 type MTProto struct {
+	ipv6      bool
 	addr      string
 	conn      *net.TCPConn
 	f         *os.File
@@ -56,9 +57,10 @@ type packetToSend struct {
 	resp chan TL
 }
 
-func NewMTProto(authkeyfile string) (*MTProto, error) {
+func NewMTProto(authkeyfile string, ipv6 bool) (*MTProto, error) {
 	var err error
 	m := new(MTProto)
+	m.ipv6 = ipv6
 
 	m.f, err = os.OpenFile(authkeyfile, os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
@@ -82,7 +84,7 @@ func NewMTProto(authkeyfile string) (*MTProto, error) {
 func (m *MTProto) Connect() error {
 	var err error
 	var tcpAddr *net.TCPAddr
-	//fmt.Println("Connecting: ", m.addr)
+	fmt.Println("Connecting: ", m.addr, m.encrypted)
 
 	// connect
 	tcpAddr, err = net.ResolveTCPAddr("tcp", m.addr)
@@ -153,9 +155,12 @@ func (m *MTProto) Connect() error {
 	x = <-resp
 	switch x.(type) {
 	case TL_config:
+		fmt.Printf("%#v\n", x.(TL_config))
 		m.dclist = make(map[int32]string, 5)
 		for _, v := range x.(TL_config).dc_options {
-			m.dclist[v.id] = fmt.Sprintf("%s:%d", v.ip_address, v.port)
+			if v.ipv6 == m.ipv6 {
+				m.dclist[v.id] = fmt.Sprintf("%s:%d", v.ip_address, v.port)
+			}
 		}
 	default:
 		return fmt.Errorf("Got: %T", x)
@@ -463,7 +468,17 @@ func (m *MTProto) SendMsg(peer_id string, msg string) error {
 	fmt.Println(f)
 	resp := make(chan TL, 1)
 	m.queueSend <- packetToSend{
-		TL_messages_sendMessage{},
+		TL_messages_sendMessage{
+			f,
+			true,
+			false,
+			peer,
+			0,
+			msg,
+			rand.Int63(),
+			TL_null{},
+			[]TL{},
+		},
 		resp,
 	}
 	x := <-resp
@@ -627,13 +642,14 @@ func (m *MTProto) ReadRoutine(stop <-chan struct{}) {
 
 }
 
-func (m *MTProto) Process(msgId int64, seqNo int32, data interface{}) (interface{}, error) {
+//func (m *MTProto) Process(msgId int64, seqNo int32, data interface{}) (interface{}, error) {
+func (m *MTProto) Process(msgId int64, seqNo int32, data interface{}) interface{} {
 	fmt.Fprintln(os.Stderr, "Received: ", reflect.TypeOf(data))
 	switch data.(type) {
 	case TL_msg_container:
-		data := data.(TL_msg_container).items
+		data := data.(TL_msg_container).messages
 		for _, v := range data {
-			m.Process(v.msg_id, v.seq_no, v.data)
+			m.Process(v.msg_id, v.seqno, v.body)
 		}
 
 	case TL_bad_server_salt:
@@ -662,14 +678,14 @@ func (m *MTProto) Process(msgId int64, seqNo int32, data interface{}) (interface
 	case TL_msgs_ack:
 		data := data.(TL_msgs_ack)
 		m.mutex.Lock()
-		for _, v := range data.msgIds {
+		for _, v := range data.msg_ids {
 			delete(m.msgsIdToAck, v)
 		}
 		m.mutex.Unlock()
 
 	case TL_rpc_result:
 		data := data.(TL_rpc_result)
-		x := m.Process(msgId, seqNo, data.obj)
+		x := m.Process(msgId, seqNo, data.result)
 		m.mutex.Lock()
 		v, ok := m.msgsIdToResp[data.req_msg_id]
 		if ok {
@@ -685,6 +701,7 @@ func (m *MTProto) Process(msgId int64, seqNo int32, data interface{}) (interface
 			break
 		}
 		data := data.(TL_rpc_error)
+		fmt.Println(data.Error())
 		return data
 
 	// Call update parsing function

@@ -25,7 +25,7 @@ var commands = map[string]int{
 func main() {
 	var err error
 
-	m, err := mtproto.NewMTProto(os.Getenv("HOME") + "/.telegram_go")
+	m, err := mtproto.NewMTProto(os.Getenv("HOME")+"/.telegram_go", false)
 	if err != nil {
 		fmt.Printf("Create failed: %s\n", err)
 		os.Exit(2)
@@ -113,6 +113,7 @@ func main() {
 		default:
 			fmt.Println(args[0], "not found.")
 		}
+		fmt.Println(err)
 	}
 
 	if err != nil {
