@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/JuanPotato/mtproto"
+	"github.com/pi0/mtproto"
 	"gopkg.in/readline.v1"
 )
 
