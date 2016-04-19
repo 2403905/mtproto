@@ -1,9 +1,8 @@
-# Tgo
+# Telegram mtproto
 
 MTProto implementation in Golang with example tool.
 
-WIP, do not expect further documentation other than this readme until it is finished
-
+** This is just a WIP Fork based on Other WIP forkes :) **
 
 # Example tool
 
@@ -12,7 +11,7 @@ Example tool saves the authkey and other data in ~/.telegram_go. If you delete/l
 ## install
 
 ```
-$ go get -v -u github.com/JuanPotato/mtproto/example/telegram
+$ go get -v -u github.com/pi0/mtproto/example/telegram
 ```
 
 ## proxy setting
