@@ -7,7 +7,6 @@ import (
 	"math/rand"
 	"net"
 	"os"
-	"reflect"
 	"runtime"
 	"strconv"
 	"sync"
@@ -19,10 +18,13 @@ import (
 var acc int64
 
 const (
-	appId             = 45139
-	appHash           = "7e55cea996fe1d94d6d22105258e3579"
+	appId   = 47480
+	appHash = "27c8d3e46e15cb59d853ddc6b608989e"
+	//  defaultServerAddr = "149.154.175.10:80" // Test
+	//	defaultServerAddr = "149.154.167.50:443" // Production
 	defaultServerAddr = "149.154.167.40:443" // Test
-//	defaultServerAddr = "149.154.167.50:443" // Production
+//      defaultServerAddr = "149.154.167.50:443" // Production
+
 )
 
 type MTProto struct {
@@ -48,8 +50,9 @@ type MTProto struct {
 	seqNo        int32
 	msgId        int64
 
-	dclist       map[int32]string
-	accessHashes map[int32]int64
+	dclist           map[int32]string
+	accessHashes     map[int32]int64
+	runningRPCServer bool
 }
 
 type packetToSend struct {
@@ -57,10 +60,11 @@ type packetToSend struct {
 	resp chan TL
 }
 
-func NewMTProto(authkeyfile string, ipv6 bool) (*MTProto, error) {
+func NewMTProto(authkeyfile string, ipv6 bool, rpcServerMode bool) (*MTProto, error) {
 	var err error
 	m := new(MTProto)
 	m.ipv6 = ipv6
+	m.runningRPCServer = rpcServerMode
 
 	m.f, err = os.OpenFile(authkeyfile, os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
@@ -153,9 +157,9 @@ func (m *MTProto) Connect() error {
 		resp,
 	}
 	x = <-resp
+	//dump(x)
 	switch x.(type) {
 	case TL_config:
-		fmt.Printf("%#v\n", x.(TL_config))
 		m.dclist = make(map[int32]string, 5)
 		for _, v := range x.(TL_config).dc_options {
 			if v.ipv6 == m.ipv6 {
@@ -205,6 +209,7 @@ func (m *MTProto) Auth(phonenumber string) error {
 		resp := make(chan TL, 1)
 		m.queueSend <- packetToSend{TL_auth_sendCode{phonenumber, 0, appId, appHash, "en"}, resp}
 		x := <-resp
+		fmt.Printf("%#v", x)
 		switch x.(type) {
 		case TL_auth_sentCode:
 			authSentCode = x.(TL_auth_sentCode)
@@ -242,57 +247,154 @@ func (m *MTProto) Auth(phonenumber string) error {
 	fmt.Print("Enter code: ")
 	fmt.Scanf("%d", &code)
 
-	if authSentCode.phone_registered {
-		resp := make(chan TL, 1)
-		m.queueSend <- packetToSend{
-			TL_auth_signIn{phonenumber, authSentCode.phone_code_hash, fmt.Sprintf("%d", code)},
-			resp,
-		}
-		x := <-resp
-		auth, ok := x.(TL_auth_authorization)
-		if !ok {
-			return fmt.Errorf("RPC: %#v", x)
-		}
-		userSelf := auth.user.(TL_user)
-		fmt.Printf("Signed in: id %d name <%s %s>\n", userSelf.id, userSelf.first_name, userSelf.last_name)
-
-	} else {
-
-		return fmt.Errorf("Cannot sign up yet")
+	// if authSentCode.phone_registered {
+	resp := make(chan TL, 1)
+	m.queueSend <- packetToSend{
+		TL_auth_signIn{phonenumber, authSentCode.phone_code_hash, fmt.Sprintf("%d", code)},
+		resp,
 	}
+	x := <-resp
+	auth, ok := x.(TL_auth_authorization)
+	if !ok {
+		return fmt.Errorf("RPC: %#v", x)
+	}
+	userSelf := auth.user.(TL_user)
+	fmt.Printf("Signed in: id %d name <%s %s>\n", userSelf.id, userSelf.first_name, userSelf.last_name)
+
+	// } else {
+	//
+	// 	return fmt.Errorf("Cannot sign up yet")
+	// }
 
 	return nil
 }
 
-func (m *MTProto) GetContacts() error {
+func (m *MTProto) ChannelParticipants(params []string) ([]TL, error) {
+	var err error
+	channelId := 0
+	offset := 1
+	limit := 10
+	var filter TL
+
+	if channelId, err = strconv.Atoi(params[0]); err != nil {
+		return nil, fmt.Errorf("Invalid channel_id value %v", params[0])
+	}
+	if len(params) >= 2 {
+		if offset, err = strconv.Atoi(params[1]); err != nil {
+			return nil, fmt.Errorf("Invalid offset value %v", params[1])
+		}
+	}
+	if len(params) >= 3 {
+		if limit, err = strconv.Atoi(params[2]); err != nil {
+			return nil, fmt.Errorf("Invalid limit value %v", params[2])
+		}
+	}
+	if len(params) >= 4 {
+		if params[3] == "admin" {
+			filter = TL_channelParticipantsAdmins{}
+		} else if params[3] == "kicked" {
+			filter = TL_channelParticipantsKicked{}
+		}
+	}
+	if filter == nil {
+		filter = TL_channelParticipantsRecent{}
+	}
+	resp := make(chan TL, 1)
+	m.queueSend <- packetToSend{TL_channels_getParticipants{
+		TL_inputChannel{
+			int32(channelId),
+			m.accessHashes[int32(channelId)],
+		},
+		filter,
+		int32(offset),
+		int32(limit),
+	}, resp}
+	x := <-resp
+
+	switch x.(type) {
+	case TL_channels_channelParticipants:
+		channelParticipants, _ := x.(TL_channels_channelParticipants)
+
+		fmt.Printf(
+			"\033[33m\033[1m%10s    %10s\033[0m\n",
+			"id", "date",
+		)
+		for _, v := range channelParticipants.participants {
+			switch v.(type) {
+			case TL_channelParticipant:
+				v := v.(TL_channelParticipant)
+				fmt.Printf(
+					"%10d    %10d\n",
+					v.user_id,
+					v.date,
+				)
+			case TL_channelParticipantCreator:
+				v := v.(TL_channelParticipantCreator)
+				fmt.Printf(
+					"%10d   %10d\n",
+					v.user_id,
+					0,
+				)
+			default:
+				fmt.Printf("Participants: %#v", v)
+			}
+		}
+		return channelParticipants.participants, nil
+
+	case TL_rpc_error:
+		err := x.(TL_rpc_error)
+		return nil, fmt.Errorf("Code: %d - %s", err.error_code, err.error_message)
+	default:
+		return nil, fmt.Errorf("RPC: %#v", x)
+	}
+}
+
+func (m *MTProto) GetContacts() (TL, error) {
 	resp := make(chan TL, 1)
 	m.queueSend <- packetToSend{TL_contacts_getContacts{""}, resp}
 	x := <-resp
-	list, ok := x.(TL_contacts_contacts)
-	if !ok {
-		return fmt.Errorf("RPC: %#v", x)
-	}
-
-	fmt.Printf(
-		"\033[33m\033[1m%10s    %10s    %-30s    %-20s\033[0m\n",
-		"id", "mutual", "name", "username",
-	)
-
-	for _, v := range list.users {
-		switch v.(type) {
-		case TL_user:
-			v := v.(TL_user)
-			fmt.Printf(
-				"%10d    %10t    %-30s    %-20s\n",
-				v.id,
-				v.mutual_contact,
-				fmt.Sprintf("%s %s", v.first_name, v.last_name),
-				v.username,
-			)
-			m.accessHashes[v.id] = v.access_hash
+	switch x.(type) {
+	case TL_contacts_contacts:
+		list, _ := x.(TL_contacts_contacts)
+		fmt.Printf(
+			"\033[33m\033[1m%10s    %10s    %-30s    %-20s\033[0m\n",
+			"id", "mutual", "name", "username",
+		)
+		for _, v := range list.users {
+			switch v.(type) {
+			case TL_user:
+				v := v.(TL_user)
+				fmt.Printf(
+					"%10d    %10t    %-30s    %-20s\n",
+					v.id,
+					v.mutual_contact,
+					fmt.Sprintf("%s %s", v.first_name, v.last_name),
+					v.username,
+				)
+				m.accessHashes[v.id] = v.access_hash
+			}
 		}
-	}
+		return list, nil
 
+	case TL_rpc_error:
+		err := x.(TL_rpc_error)
+		return nil, fmt.Errorf("Code: %d - %s", err.error_code, err.error_message)
+	default:
+		return nil, fmt.Errorf("RPC: %#v", x)
+	}
+}
+
+func (m *MTProto) Hasshes() error {
+	fmt.Printf(
+		"\033[33m\033[1m%10s    %10s\033[0m\n",
+		"channel_id", "hash",
+	)
+	for channelId, hash := range m.accessHashes {
+		fmt.Printf(
+			"%10d	%20d\n",
+			channelId, hash,
+		)
+	}
 	return nil
 }
 
@@ -300,7 +402,7 @@ func (m *MTProto) GetDialogs() error {
 	resp := make(chan TL, 1)
 	m.queueSend <- packetToSend{TL_messages_getDialogs{0, 0, TL_inputPeerSelf{}, 0}, resp}
 	x := <-resp
-	list, ok := x.(TL_messages_dialogsSlice)
+	list, ok := x.(TL_messages_dialogs)
 
 	if !ok {
 		return fmt.Errorf("RPC: %#v", x)
@@ -317,6 +419,7 @@ func (m *MTProto) GetDialogs() error {
 	chat_idx := 0
 	user_idx := 0
 	for _, v := range list.dialogs {
+		// fmt.Printf("Dialog: %#v\n\n",v)
 		switch v.(type) {
 		case TL_dialog:
 			v := v.(TL_dialog)
@@ -421,6 +524,174 @@ func (m *MTProto) ResolveUsername(username string) (peer TL, err error) {
 	return resolved, nil
 }
 
+// func (m *MTProto) ContactAddMultiple(phoneNumber string, firstName string, lastName string) error {
+//
+// }
+func (m *MTProto) ContactAdd(args []string) (TL, error) {
+	resp := make(chan TL, 1)
+
+	if len(args) < 3 {
+		return nil, fmt.Errorf("Usage contact_add <phone> <first_name> <last_name>")
+	}
+
+	phone := args[0]
+	firstName := args[1]
+	lastName := args[2]
+
+	inputContacts := make([]TL, 1)
+	inputContacts[0] = TL_inputPhoneContact{
+		rand.Int63(),
+		phone,
+		firstName,
+		lastName,
+	}
+
+	m.queueSend <- packetToSend{
+		TL_contacts_importContacts{
+			inputContacts,
+			true,
+		},
+		resp,
+	}
+	x := <-resp
+	importedContacts, ok := x.(TL_contacts_importedContacts)
+
+	if !ok {
+		return nil, fmt.Errorf("RPC: %#v", x)
+	} else {
+		fmt.Printf(
+			"\033[33m\033[1m%10s    %10s\033[0m\n",
+			"user_id", "client_id",
+		)
+		for _, v := range importedContacts.imported {
+			fmt.Printf(
+				"%10d    %10d\n",
+				v.user_id,
+				v.client_id,
+			)
+		}
+		return importedContacts, nil
+
+	}
+}
+
+func (m *MTProto) ChannelCreate(args []string) (TL, error) {
+
+	if len(args) < 1 {
+		return nil, fmt.Errorf("Usage channel_create <name> <about>*")
+	}
+	title := args[0]
+	about := ""
+	if len(args) > 1 {
+		about = args[1]
+	}
+
+	resp := make(chan TL, 1)
+	//f := uint32(0)
+	//f |= 1 << 1
+	f := uint32(0)
+	f |= 1 << 1
+	m.queueSend <- packetToSend{
+		TL_channels_createChannel{
+			f,
+			true,
+			true,
+			title,
+			about,
+		},
+		resp,
+	}
+	x := <-resp
+	switch x.(type) {
+	case TL_updates:
+		tl_updates := x.(TL_updates)
+		var tl_channel TL_channel
+	Loop:
+		for _, chat := range tl_updates.chats {
+			switch chat.(type) {
+			case TL_channel:
+				tl_channel = chat.(TL_channel)
+				break Loop
+			default:
+				break
+			}
+		}
+		return tl_channel, nil
+	case TL_rpc_error:
+		err := x.(TL_rpc_error)
+		return nil, fmt.Errorf("Code: %d - %s", err.error_code, err.error_message)
+	default:
+		return nil, fmt.Errorf("RPC %#v", x)
+	}
+}
+
+func (m *MTProto) ChannelInviteTo(params []string) ([]int32, error) {
+	var err error
+	if len(params) < 2 {
+		return nil, fmt.Errorf("Usage channel_invite_to <channel_id> <user_id>+")
+	}
+	channelId := 0
+	// this validation could be better
+	if channelId, err = strconv.Atoi(params[0]); err != nil {
+		return nil, fmt.Errorf("Invalid channel_id value %v", params[0])
+	}
+
+	tl_inputChannel := TL_inputChannel{
+		int32(channelId),
+		m.accessHashes[int32(channelId)],
+	}
+
+	tl_users := make([]TL, len(params[1:]))
+	userId := 0
+	for i, v := range params[1:] {
+		if userId, err = strconv.Atoi(v); err != nil {
+			return nil, fmt.Errorf("Invalid userid value %v", v)
+		}
+		tl_users[i] = TL_inputUser{
+			int32(userId),
+			rand.Int63(),
+		}
+	}
+
+	resp := make(chan TL, 1)
+
+	m.queueSend <- packetToSend{
+		TL_channels_inviteToChannel{
+			tl_inputChannel,
+			tl_users,
+		},
+		resp,
+	}
+
+	x := <-resp
+
+	fmt.Printf("%#v", x)
+
+	switch x.(type) {
+	case TL_updates:
+		tl_updates := x.(TL_updates)
+
+		var users []int32
+
+		for _, v := range tl_updates.updates {
+			switch v.(type) {
+			case TL_updateNewChannelMessage:
+				// TODO make this better,
+				newChannelMessage := v.(TL_updateNewChannelMessage)
+				messageService := newChannelMessage.message.(TL_messageService)
+				action := messageService.action.(TL_messageActionChatAddUser)
+				users = action.users
+			}
+		}
+		return users, nil
+	case TL_rpc_error:
+		rpcError := x.(TL_rpc_error)
+		return nil, fmt.Errorf("Code: %d - %s", rpcError.error_code, rpcError.error_message)
+	default:
+		return nil, fmt.Errorf("RPC %#v", x)
+	}
+}
+
 func (m *MTProto) GetFullChat(chat_id int32) error {
 	resp := make(chan TL, 1)
 	m.queueSend <- packetToSend{
@@ -455,8 +726,12 @@ func (m *MTProto) GetState() error {
 	return nil
 }
 
-func (m *MTProto) SendMsg(peer_id string, msg string) error {
-	peer, _ := m.parsePeerById(peer_id)
+func (m *MTProto) SendMsg(params []string) (TL, error) {
+	if len(params) < 2 {
+		return nil, fmt.Errorf("Usage msg <peer_id> <message>")
+	}
+	peer, _ := m.parsePeerById(params[0])
+	msg := params[1]
 	f := uint32(0)
 	f |= 1 << 1
 	//	f |= 1 << 3
@@ -482,13 +757,13 @@ func (m *MTProto) SendMsg(peer_id string, msg string) error {
 		resp,
 	}
 	x := <-resp
-	_, ok := x.(TL_updateShortSentMessage)
+	tl_updateShortSentMessage, ok := x.(TL_updateShortSentMessage)
 	fmt.Printf("%v, RPC: %#v", ok, x)
 	if !ok {
-		return fmt.Errorf("RPC: %#v", x)
+		return nil, fmt.Errorf("RPC: %#v", x)
 	}
 
-	return nil
+	return tl_updateShortSentMessage, nil
 }
 
 func (m *MTProto) SendMedia(peer_id string, file string) (err error) {
@@ -644,7 +919,8 @@ func (m *MTProto) ReadRoutine(stop <-chan struct{}) {
 
 //func (m *MTProto) Process(msgId int64, seqNo int32, data interface{}) (interface{}, error) {
 func (m *MTProto) Process(msgId int64, seqNo int32, data interface{}) interface{} {
-	fmt.Fprintln(os.Stderr, "Received: ", reflect.TypeOf(data))
+	//fmt.Fprintln(os.Stderr, "Received: ", reflect.TypeOf(data))
+	// fmt.Fprintln(os.Stderr, "Received: ", reflect.TypeOf(data), data)
 	switch data.(type) {
 	case TL_msg_container:
 		data := data.(TL_msg_container).messages
@@ -717,6 +993,11 @@ func (m *MTProto) Process(msgId int64, seqNo int32, data interface{}) interface{
 		// Constructor for a group of updates
 	case TL_updates:
 		// Full constructor of updates
+		if data == nil {
+			break
+		}
+		data := data.(TL_updates)
+		return data
 	default:
 		return data
 

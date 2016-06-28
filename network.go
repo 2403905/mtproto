@@ -34,6 +34,7 @@ func (m *MTProto) SendPacket(msg TL, resp chan TL) error {
 		}
 		z.Int(int32(len(obj)))
 		z.Bytes(obj)
+		// z.dump()
 
 		msgKey := sha1(z.buf)[4:20]
 		aesKey, aesIV := generateAES(msgKey, m.authKey, false)

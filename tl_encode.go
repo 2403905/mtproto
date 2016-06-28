@@ -3,9 +3,11 @@ package mtproto
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"math"
 	"math/big"
 	"time"
+	"fmt"
 )
 
 func GenerateNonce(size int) []byte {
@@ -23,6 +25,10 @@ func GenerateMessageId() int64 {
 
 type EncodeBuf struct {
 	buf []byte
+}
+
+func (e *EncodeBuf) dump() {
+	fmt.Println(hex.Dump(e.buf))
 }
 
 func NewEncodeBuf(cap int) *EncodeBuf {
@@ -123,7 +129,7 @@ func (e *EncodeBuf) VectorString(v []string) {
 }
 
 func (e *EncodeBuf) Vector(v []TL) {
-	x := make([]byte, 512)
+	x := make([]byte, 8)
 	binary.LittleEndian.PutUint32(x, crc_vector)
 	binary.LittleEndian.PutUint32(x[4:], uint32(len(v)))
 	e.buf = append(e.buf, x...)

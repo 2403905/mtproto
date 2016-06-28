@@ -11,7 +11,7 @@ Example tool saves the authkey and other data in ~/.telegram_go. If you delete/l
 ## install
 
 ```
-$ go get -v -u github.com/pi0/mtproto/example/telegram
+$ go get -v -u github.com/carlosliracl/mtproto/example/telegram
 ```
 
 ## proxy setting
@@ -19,6 +19,10 @@ Socks5 proxy is supported by env variable socks5_proxy
 ```
 $ export socks5_proxy=192.168.1.4:1080
 ```
+
+## start as rpc server
+
+$ telegram -daemon
 
 ## phone authorization
 
