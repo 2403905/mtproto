@@ -18,12 +18,11 @@ import (
 var acc int64
 
 const (
-	appId   = 47480
-	appHash = "27c8d3e46e15cb59d853ddc6b608989e"
+	appId   = 78941
+	appHash = "6decb28f01d47bb3baf51ab24b29f3a1"
 	//  defaultServerAddr = "149.154.175.10:80" // Test
-	//	defaultServerAddr = "149.154.167.50:443" // Production
-	defaultServerAddr = "149.154.167.40:443" // Test
-//      defaultServerAddr = "149.154.167.50:443" // Production
+	//defaultServerAddr = "149.154.167.40:443" // Test
+	defaultServerAddr = "149.154.167.50:443" // Production
 
 )
 
@@ -82,6 +81,7 @@ func NewMTProto(authkeyfile string, ipv6 bool, rpcServerMode bool) (*MTProto, er
 	m.sessionId = rand.Int63()
 	m.connected = false
 	m.accessHashes = map[int32]int64{}
+
 	return m, nil
 }
 
@@ -167,7 +167,7 @@ func (m *MTProto) Connect() error {
 			}
 		}
 	default:
-		return fmt.Errorf("Got: %T", x)
+		return fmt.Errorf("Got: %T\n", x)
 	}
 
 	// start keepalive pinging
@@ -217,27 +217,27 @@ func (m *MTProto) Auth(phonenumber string) error {
 		case TL_rpc_error:
 			x := x.(TL_rpc_error)
 			if x.error_code != 303 {
-				return fmt.Errorf("RPC error_code: %d, %s", x.error_code, x.error_message)
+				return fmt.Errorf("RPC error_code: %d, %s\n", x.error_code, x.error_message)
 			}
 			var newDc int32
 			n, _ := fmt.Sscanf(x.error_message, "PHONE_MIGRATE_%d", &newDc)
 			if n != 1 {
 				n, _ := fmt.Sscanf(x.error_message, "NETWORK_MIGRATE_%d", &newDc)
 				if n != 1 {
-					return fmt.Errorf("RPC error_string: %s", x.error_message)
+					return fmt.Errorf("RPC error_string: %s\n", x.error_message)
 				}
 			}
 
 			newDcAddr, ok := m.dclist[newDc]
 			if !ok {
-				return fmt.Errorf("Wrong DC index: %d", newDc)
+				return fmt.Errorf("Wrong DC index: %d\n", newDc)
 			}
 			err := m.Reconnect(newDcAddr)
 			if err != nil {
 				return err
 			}
 		default:
-			return fmt.Errorf("Got: %T", x)
+			return fmt.Errorf("Got: %T\n", x)
 		}
 
 	}
@@ -256,14 +256,14 @@ func (m *MTProto) Auth(phonenumber string) error {
 	x := <-resp
 	auth, ok := x.(TL_auth_authorization)
 	if !ok {
-		return fmt.Errorf("RPC: %#v", x)
+		return fmt.Errorf("RPC: %#v\n", x)
 	}
 	userSelf := auth.user.(TL_user)
 	fmt.Printf("Signed in: id %d name <%s %s>\n", userSelf.id, userSelf.first_name, userSelf.last_name)
 
 	// } else {
 	//
-	// 	return fmt.Errorf("Cannot sign up yet")
+	// 	return fmt.Errorf("Cannot sign up yet\n")
 	// }
 
 	return nil
@@ -277,16 +277,16 @@ func (m *MTProto) ChannelParticipants(params []string) ([]TL, error) {
 	var filter TL
 
 	if channelId, err = strconv.Atoi(params[0]); err != nil {
-		return nil, fmt.Errorf("Invalid channel_id value %v", params[0])
+		return nil, fmt.Errorf("Invalid channel_id value %v\n", params[0])
 	}
 	if len(params) >= 2 {
 		if offset, err = strconv.Atoi(params[1]); err != nil {
-			return nil, fmt.Errorf("Invalid offset value %v", params[1])
+			return nil, fmt.Errorf("Invalid offset value %v\n", params[1])
 		}
 	}
 	if len(params) >= 3 {
 		if limit, err = strconv.Atoi(params[2]); err != nil {
-			return nil, fmt.Errorf("Invalid limit value %v", params[2])
+			return nil, fmt.Errorf("Invalid limit value %v\n", params[2])
 		}
 	}
 	if len(params) >= 4 {
@@ -336,16 +336,16 @@ func (m *MTProto) ChannelParticipants(params []string) ([]TL, error) {
 					0,
 				)
 			default:
-				fmt.Printf("Participants: %#v", v)
+				fmt.Printf("Participants: %#v\n", v)
 			}
 		}
 		return channelParticipants.participants, nil
 
 	case TL_rpc_error:
 		err := x.(TL_rpc_error)
-		return nil, fmt.Errorf("Code: %d - %s", err.error_code, err.error_message)
+		return nil, fmt.Errorf("Code: %d - %s\n", err.error_code, err.error_message)
 	default:
-		return nil, fmt.Errorf("RPC: %#v", x)
+		return nil, fmt.Errorf("RPC: %#v\n", x)
 	}
 }
 
@@ -378,9 +378,9 @@ func (m *MTProto) GetContacts() (TL, error) {
 
 	case TL_rpc_error:
 		err := x.(TL_rpc_error)
-		return nil, fmt.Errorf("Code: %d - %s", err.error_code, err.error_message)
+		return nil, fmt.Errorf("Code: %d - %s\n", err.error_code, err.error_message)
 	default:
-		return nil, fmt.Errorf("RPC: %#v", x)
+		return nil, fmt.Errorf("RPC: %#v\n", x)
 	}
 }
 
@@ -398,80 +398,235 @@ func (m *MTProto) Hasshes() error {
 	return nil
 }
 
-func (m *MTProto) GetDialogs() error {
+func (m *MTProto) GetHistory(id int32) error{
 	resp := make(chan TL, 1)
-	m.queueSend <- packetToSend{TL_messages_getDialogs{0, 0, TL_inputPeerSelf{}, 0}, resp}
+	peer, _ := m.parsePeerById("419095468")
+	m.queueSend <- packetToSend{
+		TL_messages_getHistory{
+			peer,
+			1178,
+			0,
+			10,
+			0,
+			0,
+
+		}, resp,
+	}
 	x := <-resp
-	list, ok := x.(TL_messages_dialogs)
+	return fmt.Errorf("GetDialogs RPC: %#+v\n", x)
+}
+/*
+type TL_messages_getHistory struct {
+	peer       TL // InputPeer
+	offset_id  int32
+	add_offset int32
+	limit      int32
+	max_id     int32
+	min_id     int32
+}
+*/
+
+func (m *MTProto) GetMessages(chat_id int32) error{
+	resp := make(chan TL, 1)
+	m.queueSend <- packetToSend{
+		TL_messages_getMessages{
+			[]int32{
+				chat_id,
+				},
+		}, resp,
+	}
+	x := <-resp
+	list, ok := x.(TL_messages_messages)
 
 	if !ok {
-		return fmt.Errorf("RPC: %#v", x)
+		return fmt.Errorf("GetDialogs RPC: %v\n%#v\n", ok,x)
+	}
+	return fmt.Errorf("GetDialogs RPC: %v\n%#+v\n", ok,list)
+	return nil
+}
+
+func (m *MTProto) ReadMessageContents(id int32) error{
+	resp := make(chan TL, 1)
+	m.queueSend <- packetToSend{
+		TL_messages_readMessageContents{
+			[]int32{
+				id,
+				},
+		}, resp,
+	}
+	x := <-resp
+	return fmt.Errorf("ReadMessageContents RPC: %#+v\n", x)
+}
+
+func (m *MTProto) UpdateState() error{
+	resp := make(chan TL, 1)
+	m.queueSend <- packetToSend{
+		TL_account_updateStatus{
+			false,
+		}, resp,
+	}
+	x := <-resp
+
+	return fmt.Errorf("UpdateState RPC: %#+v\n",x)
+}
+
+func (m *MTProto) GetDialogs() error {
+	resp := make(chan TL, 1)
+	m.queueSend <- packetToSend{TL_messages_getDialogs{0, 0, TL_inputPeerSelf{}, 40}, resp}
+	x := <-resp
+	list, ok := x.(TL_messages_dialogsSlice)
+
+	if !ok {
+		return fmt.Errorf("GetDialogs RPC: %v\n%#v\n", ok,x)
+	}
+	//fmt.Printf("GetDialogs RPC: %#v\n", x)
+
+	//users
+	var users map[int32]TL
+	users = make(map[int32]TL)
+	for _, user := range list.users {
+		user := user.(TL_user)
+		users[user.id] = user
+	}
+	//chats
+	var chats map[int32]TL
+	chats = make(map[int32]TL)
+	for _, chat := range list.chats {
+		switch chat.(type) {
+		case TL_chatEmpty:
+			chat := chat.(TL_chatEmpty)
+			chats[chat.id] = chat
+		case TL_chat:
+			chat := chat.(TL_chat)
+			chats[chat.id] = chat
+		case TL_chatForbidden:
+			chat := chat.(TL_chatForbidden)
+			chats[chat.id] = chat
+		//case TL_channelEmpty:
+		case TL_channel:
+			chat := chat.(TL_channel)
+			chats[chat.id] = chat
+		case TL_channelForbidden:
+			chat := chat.(TL_chatForbidden)
+			chats[chat.id] = chat
+		}
+	}
+	//messages
+	var messages map[int32]string
+	messages = make(map[int32]string)
+	for _, message := range list.messages {
+		switch message.(type) {
+		case TL_messageEmpty:
+			message := message.(TL_messageEmpty)
+			messages[message.id] = "TL_messageEmpty"
+		/*
+		case TL_messageForwarded:
+			message := message.(TL_messageForwarded)
+			var to_id int32
+			switch message.to_id.(type) {
+			case TL_peerUser:
+				to_id = message.to_id.(TL_peerUser).user_id
+			case TL_peerChat:
+				to_id = message.to_id.(TL_peerChat).chat_id
+			case TL_peerChannel:
+				to_id = message.to_id.(TL_peerChannel).channel_id
+			}
+			messages[to_id] = "TL_messageForwarded"
+		*/
+		case TL_message:
+			message := message.(TL_message)
+			var to_id int32
+			switch message.to_id.(type) {
+			case TL_peerUser:
+				to_id = message.to_id.(TL_peerUser).user_id
+			case TL_peerChat:
+				to_id = message.to_id.(TL_peerChat).chat_id
+			case TL_peerChannel:
+				to_id = message.to_id.(TL_peerChannel).channel_id
+			}
+			messages[to_id] = "TL_message"
+		case TL_messageService:
+			message := message.(TL_messageService)
+			var to_id int32
+			switch message.to_id.(type) {
+			case TL_peerUser:
+				to_id = message.to_id.(TL_peerUser).user_id
+			case TL_peerChat:
+				to_id = message.to_id.(TL_peerChat).chat_id
+			case TL_peerChannel:
+				to_id = message.to_id.(TL_peerChannel).channel_id
+			}
+			messages[to_id] = "TL_messageService"
+		}
 	}
 
 	fmt.Printf(
-		"\033[33m\033[1m%10s    %10s    %-10s    %-5s	%-20s\033[0m\n",
-		"id", "type", "top_message", "unread_count", "title",
+		"\033[33m\033[1m%10s    \033[33m\033[1m%10s    %10s    %-10s    %-5s	%-20s\033[0m\n",
+		"idx", "id", "type", "top_message", "unread_count", "title",
 	)
-
 	t := ""
 	i := int32(0)
 	title := ""
 	chat_idx := 0
 	user_idx := 0
+	idx := 0
 	for _, v := range list.dialogs {
 		// fmt.Printf("Dialog: %#v\n\n",v)
 		switch v.(type) {
-		case TL_dialog:
-			v := v.(TL_dialog)
-			switch v.peer.(type) {
-			case TL_peerUser:
-				t = "User"
-				i = v.peer.(TL_peerUser).user_id
-				switch list.users[user_idx].(type) {
-				case TL_user:
-					u := list.users[user_idx].(TL_user)
-					title = fmt.Sprintf("%s %s(%s)", u.first_name, u.last_name, u.username)
-					m.accessHashes[u.id] = u.access_hash
+			case TL_dialog:
+				v := v.(TL_dialog)
+				switch v.peer.(type) {
+					case TL_peerUser:
+						t = "User"
+						i = v.peer.(TL_peerUser).user_id
+						switch users[i].(type) {
+							case TL_user:
+								u := list.users[user_idx].(TL_user)
+								title = fmt.Sprintf("%s %s(%s)", u.first_name, u.last_name, u.username)
+								m.accessHashes[u.id] = u.access_hash
+						}
+						user_idx = user_idx + 1
+						idx = user_idx
+					case TL_peerChat:
+						t = "Chat"
+						i = v.peer.(TL_peerChat).chat_id
+						switch chats[i].(type) {
+							case TL_chatEmpty:
+								title = "Empty"
+							case TL_chat:
+								title = chats[i].(TL_chat).title
+							case TL_chatForbidden:
+								title = chats[i].(TL_chatForbidden).title
+						}
+						chat_idx = chat_idx + 1
+						idx = chat_idx
 				}
-				user_idx = user_idx + 1
-			case TL_peerChat:
-				t = "Chat"
-				i = v.peer.(TL_peerChat).chat_id
-				switch list.chats[chat_idx].(type) {
-				case TL_chatEmpty:
-					title = "Empty"
-				case TL_chat:
-					title = list.chats[chat_idx].(TL_chat).title
-				case TL_chatForbidden:
-					title = list.chats[chat_idx].(TL_chatForbidden).title
+				fmt.Printf(
+					"%10d	%10d	%8s	%-10d	%-5d	%-20s\n",
+					idx, i, t, v.top_message, v.unread_count, messages[i]+"#"+title,
+				)
+			case TL_dialogChannel:
+				v := v.(TL_dialogChannel)
+				t = "Channel"
+				i = v.peer.(TL_peerChannel).channel_id
+				switch chats[i].(type) {
+					case TL_chatEmpty:
+						title = "Empty"
+					case TL_channel:
+						ch := chats[i].(TL_channel)
+						title = ch.title
+						m.accessHashes[ch.id] = ch.access_hash
+					case TL_channelForbidden:
+						ch := chats[i].(TL_channelForbidden)
+						title = ch.title
+						m.accessHashes[ch.id] = ch.access_hash
 				}
 				chat_idx = chat_idx + 1
-			}
-			fmt.Printf(
-				"%10d	%8s	%-10d	%-5d	%-20s\n",
-				i, t, v.top_message, v.unread_count, title,
-			)
-		case TL_dialogChannel:
-			v := v.(TL_dialogChannel)
-			t = "Channel"
-			i = v.peer.(TL_peerChannel).channel_id
-			switch list.chats[chat_idx].(type) {
-			case TL_chatEmpty:
-				title = "Empty"
-			case TL_channel:
-				ch := list.chats[chat_idx].(TL_channel)
-				title = ch.title
-				m.accessHashes[ch.id] = ch.access_hash
-			case TL_channelForbidden:
-				ch := list.chats[chat_idx].(TL_channelForbidden)
-				title = ch.title
-				m.accessHashes[ch.id] = ch.access_hash
-			}
-			chat_idx = chat_idx + 1
-			fmt.Printf(
-				"%10d	%8s	%-10d	%-5d	%-20s\n",
-				i, t, v.top_message, v.unread_count, title,
-			)
+				idx = chat_idx
+				fmt.Printf(
+					"%10d	%10d	%8s	%-10d	%-5d	%-20s\n",
+					idx, i, t, v.top_message, v.unread_count, messages[i]+"#"+title,
+				)
 		}
 	}
 	return nil
@@ -511,7 +666,7 @@ func (m *MTProto) ResolveUsername(username string) (peer TL, err error) {
 	resolved, ok := x.(TL_contacts_resolvedPeer)
 
 	if !ok {
-		return nil, fmt.Errorf("RPC: %#v", x)
+		return nil, fmt.Errorf("RPC: %#v\n", x)
 	}
 
 	switch resolved.peer.(type) {
@@ -905,6 +1060,10 @@ func (m *MTProto) ReadRoutine(stop <-chan struct{}) {
 	for true {
 		data, err := m.Read(stop)
 		if err != nil {
+			if err.Error() == "EOF" {
+				fmt.Fprintln(os.Stderr, "ReadRoutine:", err)
+				continue
+			}
 			fmt.Fprintln(os.Stderr, "ReadRoutine:", err)
 			os.Exit(2)
 		}
@@ -982,14 +1141,19 @@ func (m *MTProto) Process(msgId int64, seqNo int32, data interface{}) interface{
 
 	// Call update parsing function
 	case TL_updatesTooLong:
+		fmt.Printf("new TL_updatesTooLong:%#v\n",data)
 		// Too many updates, it is necessary to execute updates.getDifference
 	case TL_updateShortMessage:
+		fmt.Printf("new TL_updateShortMessage:%#v\n",data)
 		// Shortened constructor containing info on one new incoming message from a contact
 	case TL_updateShortChatMessage:
+		fmt.Printf("new TL_updateShortChatMessage:%#v\n",data)
 		// Shortened constructor containing info on one new incoming text message from a chat
 	case TL_updateShort:
+		fmt.Printf("new TL_updateShort:%#v\n",data)
 		// Shortened constructor containing info on one update not requiring auxiliaty data
 	case TL_updatesCombined:
+		fmt.Printf("new TL_updatesCombined:%#v\n",data)
 		// Constructor for a group of updates
 	case TL_updates:
 		// Full constructor of updates

@@ -27,6 +27,12 @@ var commands = map[string]int{
 	"sendmedia":       2,
 	"update_username": 1,
 	"exit":            0,
+	"GetMessages":1,
+	"ReadMessageContents":1,
+	"GetHistory":1,
+	"test0":0,
+	"test1":1,
+	"test2":2,
 }
 
 func main() {
@@ -73,6 +79,12 @@ func main() {
 			readline.PcItem("sendmedia"),
 			readline.PcItem("resolve_username"),
 			readline.PcItem("exit"),
+			readline.PcItem("GetMessages"),
+			readline.PcItem("ReadMessageContents"),
+			readline.PcItem("GetHistory"),
+			readline.PcItem("test0"),
+			readline.PcItem("test1"),
+			readline.PcItem("test2"),
 		)
 
 		rl, err := readline.NewEx(&readline.Config{
@@ -145,6 +157,20 @@ func main() {
 				err = m.Hasshes()
 			case "exit":
 				shell = false
+			case "GetHistory":
+				chat_id, _ := strconv.Atoi(args[1])
+				err = m.GetHistory(int32(chat_id))
+			case "GetMessages":
+				chat_id, _ := strconv.Atoi(args[1])
+				err = m.GetMessages(int32(chat_id))
+			case "ReadMessageContents":
+				chat_id, _ := strconv.Atoi(args[1])
+				err = m.ReadMessageContents(int32(chat_id))
+			case "test0":
+				err = m.UpdateState()
+			case "test1":
+				chat_id, _ := strconv.Atoi(args[1])
+				err = m.ReadMessageContents(int32(chat_id))
 			default:
 				fmt.Println(args[0], "not found.")
 			}
